@@ -1,0 +1,2 @@
+- since we do not want to multithread exazk.py, change config to only manage one service per exazk.py process
+- 
