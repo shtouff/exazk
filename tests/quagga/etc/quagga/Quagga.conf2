@@ -1,0 +1,23 @@
+hostname Router
+hostname bgpd
+log stdout
+!
+password zebra
+enable password zebra
+!
+interface eth0
+ ipv6 nd suppress-ra
+!
+interface eth1
+ ipv6 nd suppress-ra
+!
+interface lo
+!
+router bgp 65012
+ bgp router-id 172.28.128.12
+ neighbor 172.28.128.1 remote-as 65001
+ neighbor 172.28.128.11 remote-as 65011
+ neighbor 172.28.128.13 remote-as 65013
+!
+line vty
+!

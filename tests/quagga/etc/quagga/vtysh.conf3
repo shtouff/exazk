@@ -2,6 +2,6 @@
 ! Sample configuration file for vtysh.
 !
 service integrated-vtysh-config
-hostname quagga
+hostname quagga3
 username root nopassword
 !

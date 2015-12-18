@@ -1,11 +1,21 @@
 # -*- mode: ruby -*-
 # vi: set ft=ruby :
 
-Vagrant.configure(2) do |config|
-  config.vm.box = "jessie64"
-  config.vm.network "private_network", ip: "172.28.128.3"
+N = 3
 
-  config.vm.provision "ansible" do |ansible|
-      ansible.playbook = "quagga.yml"
+Vagrant.configure(2) do |config|
+  (1..N).each do |machine_id|
+    config.vm.define "machine#{machine_id}" do |machine|
+
+      machine.vm.hostname = "quagga#{machine_id}"
+      machine.vm.network "private_network", ip: "172.28.128.#{10+machine_id}"
+      machine.vm.box = "jessie64"
+      machine.vm.provision "ansible" do |ansible|
+        ansible.playbook = "quagga.yml"
+        ansible.extra_vars = {
+          machine_id: "#{machine_id}"
+        }
+      end
+    end
   end
 end

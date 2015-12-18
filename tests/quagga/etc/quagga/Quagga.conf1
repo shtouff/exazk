@@ -13,9 +13,11 @@ interface eth1
 !
 interface lo
 !
-router bgp 65002
- bgp router-id 172.28.128.3
+router bgp 65011
+ bgp router-id 172.28.128.11
  neighbor 172.28.128.1 remote-as 65001
+ neighbor 172.28.128.12 remote-as 65012
+ neighbor 172.28.128.13 remote-as 65013
 !
 line vty
 !
