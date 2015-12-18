@@ -1,2 +1,3 @@
 - manage maintenance mode
 - use args rather than conffile
+- add ExaBGP-compatible BGP speaker
