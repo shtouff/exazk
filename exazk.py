@@ -3,6 +3,7 @@
 import yaml
 import time
 import sys
+import signal
 import os
 import logging
 import subprocess
@@ -87,6 +88,7 @@ class EZKRuntime:
         # flags
         self.refresh = True
         self.recreate = True
+        self.shouldstop = False
 
     def set_bgp_table(self, table):
         if not isinstance(table, BGPTable):
@@ -140,6 +142,14 @@ conf = EZKConfFactory().create_from_yaml_file(sys.argv[1])
 zk = KazooClient(hosts=','.join(conf.zk_hosts))
 runtime = EZKRuntime(conf=conf, zk=zk)
 
+# exits gracefully when possible
+def exit_signal_handler(signal, frame):
+    logger.info('received signal %s, preparing to stop' % signal)
+    runtime.shouldstop = True
+
+signal.signal(signal.SIGINT, exit_signal_handler)
+signal.signal(signal.SIGTERM, exit_signal_handler)
+
 def zk_transition(state):
     logger.info('zk state changed to %s' % state)
 
@@ -174,7 +184,7 @@ def zk_watch(children):
     logger.debug('zk children are %s' % children)
     runtime.refresh = True
 
-while True:
+while not runtime.shouldstop:
     time.sleep(1)
 
     if not ServiceChecker(runtime.get_conf().local_check).check():
@@ -187,4 +197,12 @@ while True:
         runtime.refresh_children()
 
     BGPSpeaker(runtime.get_bgp_table()).advertise_routes()
+
+# main loop exited, cleaning resources
+try:
+    runtime.get_zk().stop()
+    runtime.get_zk().close()
+    logger.info('ExaZK stopped')
+except Exception as e:
+    logger.error('did my best but something went wrong while stopping :(')
 
