@@ -95,6 +95,10 @@ class EZKRuntime:
         self.recreate = True
         self.shouldstop = False
 
+        # slow & fast cycles
+        self.longsleep = 10
+        self.shortsleep = 0.1
+
     def set_bgp_table(self, table):
         if not isinstance(table, BGPTable):
             raise Exception('BGPTable object expected')
@@ -141,6 +145,12 @@ class EZKRuntime:
                 dst='1.1.1.1', metric=100)
         self.set_bgp_table(bgp_table)
 
+    def trigger_refresh(self):
+        self.refresh = True
+
+    def trigger_recreate(self):
+        self.recreate = True
+
 class EZKState(KazooState):
     INIT = "INIT"
 
@@ -172,10 +182,10 @@ def zk_transition(state):
 
     if state == KazooState.LOST:
         logger.error('zk lost, have to re-create ephemeral node')
-        runtime.recreate = True
+        runtime.trigger_recreate()
 
     if state == KazooState.CONNECTED:
-        runtime.refresh = True
+        runtime.trigger_refresh()
 
 runtime.get_zk().add_listener(zk_transition)
 runtime.get_zk().start()
@@ -195,10 +205,20 @@ while runtime.get_zk().exists('%s/%s/%s' % (
     runtime.get_conf().srv_name))
 def zk_watch(children):
     logger.debug('zk children are %s' % children)
-    runtime.refresh = True
+    runtime.trigger_refresh()
 
 while not runtime.shouldstop:
-    time.sleep(1)
+
+    now = start = time.time()
+    while not runtime.refresh and not runtime.recreate \
+            and now<start+runtime.longsleep \
+            and not runtime.shouldstop:
+
+        time.sleep(runtime.shortsleep)
+        now = time.time()
+
+    if runtime.shouldstop:
+        break
 
     if not ServiceChecker(runtime.get_conf().local_check).check():
         continue
