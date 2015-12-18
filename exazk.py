@@ -1,204 +1,207 @@
-#! /usr/bin/env python
+#!/usr/bin/env python
 
-import socket
-import sys
 import yaml
-import subprocess
 import time
+import sys
+import signal
+import os
 import logging
+import subprocess
+
 from kazoo.client import KazooClient, KazooState
+from kazoo.exceptions import SessionExpiredError
 
 logging.basicConfig()
 logger = logging.getLogger()
 logger.setLevel('DEBUG')
 
-class ExaBGPInstance:
-    def __init__(self):
-        pass
+class ServiceChecker:
+    def __init__(self, command):
+        self.command = command
 
-    def announce(self, route, dest, metric):
-        pass
+    def check(self):
+        try:
+            DEVNULL = open(os.devnull, 'w')
+            subprocess.check_call(self.command, shell=True,
+                    stdout=DEVNULL, stderr=DEVNULL, close_fds=True)
+            return True
+        except subprocess.CalledProcessError as e:
+            logger.error('local check returned: %s' % e.returncode)
 
-class ExaZKService:
+        return False
 
-    def __init__(self, **kwargs):
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-            logger.debug('ExaZKService: %s <= %s' % ( key, value ))
-
-    def display(self):
-        print(self.name)
-
-class ExaZKConf:
-
-    def __init__(self, **kwargs):
-        yml = yaml.safe_load(open(kwargs['path']))
-
-        self.zk_hosts = yml['zk_hosts']
-        self.zk_path_maintenance = yml['zk_path_maintenance']
-        self.zk_path_service = yml['zk_path_service']
-        self.local_check = yml['local_check']
-
-        self.services = {}
-        for srv in yml['services']:
-            self.services[srv] = ExaZKService( name = srv, **yml['services'][srv] )
-
-    def getService(self, name):
-        for key, value in self.services.items():
-            if key == name:
-                return value
-
-        return None
-
-
-class ExaZKBGPTable:
-
+class BGPTable:
     def __init__(self):
         self.table = []
 
-    def add_route(self, **kwargs):
-        logger.debug('adding BGP route %s' % kwargs['prefix'])
-        self.table.append(kwargs)
+    def add_route(self, **route):
+        if 'prefix' not in route or 'dst' not in route or 'metric' not in route:
+            raise Exception('prefix, dst & metric are mandatory in route')
+        logger.debug('adding BGP route: %s' % route['prefix'])
+        self.table.append(route)
 
-    def del_route(self, **kwargs):
-        self.table.remove(kwargs)
+    def del_route(self, **route):
+        if 'prefix' not in route or 'dst' not in route or 'metric' not in route:
+            raise Exception('prefix, dst & metric are mandatory in route')
+        logger.debug('removing BGP route: %s' % route['prefix'])
+        self.table.remove(route)
 
     def get_routes(self):
         return self.table
 
-class ExaZKRuntime:
+class BGPSpeaker:
+    def __init__(self, table):
+        if not isinstance(table, BGPTable):
+            raise Exception('BGPTable object expected')
 
-    def __init__(self, conf):
-        if not isinstance(conf, ExaZKConf):
-            raise Exception('ExaZKConf object expected')
+        self.table = table
 
-        self.bgp_table = ExaZKBGPTable()
-        self.refresh = False
-        self.recreate = False
+    def advertise_routes(self):
+        for route in self.table.get_routes():
+            print('SAYING TO EXABGP: prefix %s dst %s metric %s' %
+                    (route['prefix'], route['dst'], route['metric']))
+        print('')
 
-    def set_bgp_table(self, bgp_table):
-        self.bgp_table = bgp_table
+class EZKConfFactory:
+    def create_from_yaml_file(self, path):
+        yml = yaml.safe_load(open(path))
+
+        return EZKConf(**yml)
+
+class EZKConf:
+    def __init__(self, **kwargs):
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+
+class EZKRuntime:
+    def __init__(self, conf, zk):
+        if not isinstance(conf, EZKConf):
+            raise Exception('EZKConf object expected')
+
+        if not isinstance(zk, KazooClient):
+            raise Exception('KazooClient expected')
+
+        self.conf = conf
+        self.zk = zk
+        self.bgp_table = BGPTable()
+
+        # flags
+        self.refresh = True
+        self.recreate = True
+        self.shouldstop = False
+
+    def set_bgp_table(self, table):
+        if not isinstance(table, BGPTable):
+            raise Exception('BGPTable object expected')
+
+        self.bgp_table = table
 
     def get_bgp_table(self):
         return self.bgp_table
 
-class ServiceCheckerThread():
-    def __init__(self, conf):
-        if not isinstance(conf, ExaZKConf):
-            raise Exception('ExaZKConf object expected')
+    def get_conf(self):
+        return self.conf
 
-        self.command = conf.local_check
+    def get_zk(self):
+        return self.zk
 
-    def mustrun(self):
-        return True
+    def create_node(self):
+        self.recreate = False
+        logger.info('re-creating my ephemeral node')
 
-    def run(self):
-        while self.mustrun():
-            self.check()
-            time.sleep(1)
+        try:
+            self.get_zk().create('%s/%s/%s' % (
+                self.get_conf().zk_path_service,
+                self.get_conf().srv_name,
+                self.get_conf().srv_auth_ip), ephemeral=True)
+        except SessionExpiredError as e:
+            self.recreate = True
 
-    def check(self):
-        if subprocess.Popen(self.command).wait() == 0:
-            logger.debug('local check successed')
-            return True
-        else:
-            logger.debug('local check failed')
-            return False
+    def refresh_children(self):
+        self.refresh = False
+        logger.info('refreshing children & routes')
 
-class ExaZKState(KazooState):
+        children = self.get_zk().get_children('%s/%s' % (
+                self.get_conf().zk_path_service,
+                self.get_conf().srv_name))
+        bgp_table = BGPTable()
+
+        for ip in self.get_conf().srv_non_auth_ips:
+            if ip not in children:
+                bgp_table.add_route(prefix=ip, dst='1.1.1.1', metric=200)
+
+        bgp_table.add_route(prefix=runtime.get_conf().srv_auth_ip,
+                dst='1.1.1.1', metric=100)
+        self.set_bgp_table(bgp_table)
+
+class EZKState(KazooState):
     INIT = "INIT"
 
-
-conf = ExaZKConf(path=sys.argv[1])
-runtime = ExaZKRuntime(conf)
-
-apex = conf.getService('apex')
-
-ppath = '%s/apex' % conf.zk_path_service
-path = '%s/%s' % (ppath, apex.auth_ip)
-pstate = ExaZKState.INIT
-
-def zk_listener(state):
-    global pstate
-    global runtime
-    global apex
-    global path
-    global ppath
-    global zk
-
-    logger.debug('zk state changed to  %s' % state)
-    if state == ExaZKState.SUSPENDED:
-        logger.error('lost connection to zk, cleaning bgp routes')
-        bgp_routes = ExaZKBGPTable()
-        runtime.set_bgp_table(bgp_routes)
-
-    if state == ExaZKState.LOST:
-        logger.error('lost ephemeral nodes, re-creating them')
-        #zk.create(path, socket.gethostname(), ephemeral=True)
-        runtime.recreate = True
-        runtime.refresh = True
-
-    if state == ExaZKState.CONNECTED and pstate != ExaZKState.INIT:
-        logger.error('we reconnected')
-        runtime.refresh = True
-        #zk
-
-    pstate = state
-
+logger.info('ExaZK starting...')
+conf = EZKConfFactory().create_from_yaml_file(sys.argv[1])
 zk = KazooClient(hosts=','.join(conf.zk_hosts))
-zk.add_listener(zk_listener)
-zk.start()
+runtime = EZKRuntime(conf=conf, zk=zk)
 
-zk.ensure_path(ppath)
+# exits gracefully when possible
+def exit_signal_handler(signal, frame):
+    logger.info('received signal %s, preparing to stop' % signal)
+    runtime.shouldstop = True
 
-if zk.exists(path):
-    logger.warn("deleting stale node %s" % path)
-    zk.delete(path)
+signal.signal(signal.SIGINT, exit_signal_handler)
+signal.signal(signal.SIGTERM, exit_signal_handler)
 
-zk.create(path,
-    socket.gethostname(), ephemeral=True)
+def zk_transition(state):
+    logger.info('zk state changed to %s' % state)
 
-@zk.ChildrenWatch(ppath)
-def service_changed(children):
-    global runtime
-    print('Children are now: %s' % children)
+    if state == KazooState.SUSPENDED:
+        logger.error('zk disconnected, flushing routes...')
+        runtime.set_bgp_table(BGPTable())
 
-    bgp_routes = ExaZKBGPTable()
+    if state == KazooState.LOST:
+        logger.error('zk lost, have to re-create ephemeral node')
+        runtime.recreate = True
 
-    for ip in apex.non_auth_ips:
-        if ip not in children:
-            bgp_routes.add_route(prefix=ip, dst='1.1.1.1', metric=200)
+    if state == KazooState.CONNECTED:
+        runtime.refresh = True
 
-    bgp_routes.add_route(prefix=apex.auth_ip, dst='1.1.1.1', metric=100)
+runtime.get_zk().add_listener(zk_transition)
+runtime.get_zk().start()
+runtime.get_zk().ensure_path('%s/%s' % (
+    runtime.get_conf().zk_path_service,
+    runtime.get_conf().srv_name))
 
-    runtime.set_bgp_table(bgp_routes)
-
-while True:
+while runtime.get_zk().exists('%s/%s/%s' % (
+    runtime.get_conf().zk_path_service,
+    runtime.get_conf().srv_name,
+    runtime.get_conf().srv_auth_ip)):
+    logger.warn('stale node found, sleeping(1)...')
     time.sleep(1)
 
-    if runtime.refresh:
-        runtime.refresh = False
-        bgp_routes = ExaZKBGPTable()
-        children = zk.get_children(ppath)
+@zk.ChildrenWatch('%s/%s' % (
+    runtime.get_conf().zk_path_service,
+    runtime.get_conf().srv_name))
+def zk_watch(children):
+    logger.debug('zk children are %s' % children)
+    runtime.refresh = True
 
-        for ip in apex.non_auth_ips:
-            if ip not in children:
-                bgp_routes.add_route(prefix=ip, dst='1.1.1.1', metric=200)
+while not runtime.shouldstop:
+    time.sleep(1)
 
-        bgp_routes.add_route(prefix=apex.auth_ip, dst='1.1.1.1', metric=100)
-
-        runtime.set_bgp_table(bgp_routes)
+    if not ServiceChecker(runtime.get_conf().local_check).check():
+        continue
 
     if runtime.recreate:
-        runtime.recreate = False
+        runtime.create_node()
 
-        zk.create(path,
-            socket.gethostname(), ephemeral=True)
+    if runtime.refresh:
+        runtime.refresh_children()
 
-    for route in runtime.get_bgp_table().get_routes():
-        print ('announce %s => %s metric %s' %
-                (route['prefix'], route['dst'], route['metric']) )
-    print ()
+    BGPSpeaker(runtime.get_bgp_table()).advertise_routes()
 
-
-
+# main loop exited, cleaning resources
+try:
+    runtime.get_zk().stop()
+    runtime.get_zk().close()
+    logger.info('ExaZK stopped')
+except Exception as e:
+    logger.error('did my best but something went wrong while stopping :(')

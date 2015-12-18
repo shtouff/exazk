@@ -1,0 +1,14 @@
+---
+# zk configuration
+zk_hosts: 
+    - localhost
+zk_path_service: /exabgp/service
+zk_path_maintenance: /exabgp/maintenance
+
+# how to check local service
+local_check: /usr/local/bin/check_local_nginx.sh
+
+srv_name: apex
+srv_auth_ip: 10.20.255.3
+srv_non_auth_ips: [ 10.20.255.1, 10.20.255.2 ]
+...
