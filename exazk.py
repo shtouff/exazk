@@ -32,24 +32,19 @@ class ServiceChecker:
 
 class BGPTable:
     def __init__(self):
-        self.table = []
+        self.announce = []
 
     def add_route(self, **route):
         if 'prefix' not in route or 'dst' not in route or 'metric' not in route:
             raise Exception('prefix, dst & metric are mandatory in route')
         logger.debug('adding BGP route: %s' % route['prefix'])
-        self.table.append(route)
-
-    def del_route(self, **route):
-        if 'prefix' not in route or 'dst' not in route or 'metric' not in route:
-            raise Exception('prefix, dst & metric are mandatory in route')
-        logger.debug('removing BGP route: %s' % route['prefix'])
-        self.table.remove(route)
+        self.announce.append(route)
 
     def get_routes(self):
-        return self.table
+        return self.announce
 
 class BGPSpeaker:
+
     def __init__(self, table):
         if not isinstance(table, BGPTable):
             raise Exception('BGPTable object expected')
@@ -57,10 +52,20 @@ class BGPSpeaker:
         self.table = table
 
     def advertise_routes(self):
-        for route in self.table.get_routes():
-            print('SAYING TO EXABGP: prefix %s dst %s metric %s' %
-                    (route['prefix'], route['dst'], route['metric']))
-        print('')
+        logger.info("advertising routes")
+        announce = self.table.get_routes()
+        for route in announce:
+            print('announce route %s/32 next-hop self med %s' %
+                (route['prefix'], route['metric']))
+        sys.stdout.flush()
+
+    def withdraw_route(self, **route):
+        if 'prefix' not in route or 'dst' not in route or 'metric' not in route:
+            raise Exception('prefix, dst & metric are mandatory in route')
+        logger.debug('removing BGP route: %s' % route['prefix'])
+        print('withdraw route %s/32 next-hop self med %s' %
+            (route['prefix'], route['metric']))
+        sys.stdout.flush()
 
 class EZKConfFactory:
     def create_from_yaml_file(self, path):
@@ -129,6 +134,8 @@ class EZKRuntime:
         for ip in self.get_conf().srv_non_auth_ips:
             if ip not in children:
                 bgp_table.add_route(prefix=ip, dst='1.1.1.1', metric=200)
+            else:
+                BGPSpeaker(BGPTable()).withdraw_route(prefix=ip, dst='1.1.1.1', metric=200)
 
         bgp_table.add_route(prefix=runtime.get_conf().srv_auth_ip,
                 dst='1.1.1.1', metric=100)
@@ -155,7 +162,13 @@ def zk_transition(state):
 
     if state == KazooState.SUSPENDED:
         logger.error('zk disconnected, flushing routes...')
+
         runtime.set_bgp_table(BGPTable())
+        bgp_speaker = BGPSpeaker(BGPTable())
+        for ip in runtime.get_conf().srv_non_auth_ips:
+            bgp_speaker.withdraw_route(prefix=ip, dst='1.1.1.1', metric=200)
+        bgp_speaker.withdraw_route(prefix=runtime.get_conf().srv_auth_ip,
+            dst='1.1.1.1', metric=100)
 
     if state == KazooState.LOST:
         logger.error('zk lost, have to re-create ephemeral node')
