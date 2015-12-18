@@ -1,2 +1,3 @@
 kazoo==2.2.1
 PyYAML==3.11
+exabgp==3.4.13
