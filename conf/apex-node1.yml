@@ -9,6 +9,6 @@ zk_path_maintenance: /exabgp/maintenance
 local_check: /usr/local/bin/check_local_nginx.sh
 
 srv_name: apex
-srv_auth_ip: x
-srv_non_auth_ips: [ y, z ]
+srv_auth_ip: 10.20.255.1
+srv_non_auth_ips: [ 10.20.255.2, 10.20.255.3 ]
 ...
