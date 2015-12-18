@@ -3,7 +3,9 @@
 import yaml
 import time
 import sys
+import os
 import logging
+import subprocess
 
 from kazoo.client import KazooClient, KazooState
 from kazoo.exceptions import SessionExpiredError
@@ -11,6 +13,21 @@ from kazoo.exceptions import SessionExpiredError
 logging.basicConfig()
 logger = logging.getLogger()
 logger.setLevel('DEBUG')
+
+class ServiceChecker:
+    def __init__(self, command):
+        self.command = command
+
+    def check(self):
+        try:
+            DEVNULL = open(os.devnull, 'w')
+            subprocess.check_call(self.command, shell=True,
+                    stdout=DEVNULL, stderr=DEVNULL, close_fds=True)
+            return True
+        except subprocess.CalledProcessError as e:
+            logger.error('local check returned: %s' % e.returncode)
+
+        return False
 
 class BGPTable:
     def __init__(self):
@@ -160,6 +177,9 @@ def zk_watch(children):
 while True:
     time.sleep(1)
 
+    if not ServiceChecker(runtime.get_conf().local_check).check():
+        continue
+
     if runtime.recreate:
         runtime.create_node()
 
@@ -167,5 +187,4 @@ while True:
         runtime.refresh_children()
 
     BGPSpeaker(runtime.get_bgp_table()).advertise_routes()
-
 
