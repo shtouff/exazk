@@ -142,9 +142,8 @@ class EZKRuntime:
         logger.info('re-creating my ephemeral node')
 
         try:
-            self.get_zk().create('%s/%s/%s' % (
+            self.get_zk().create('%s/%s' % (
                 self.get_conf().zk_path_service,
-                self.get_conf().srv_name,
                 self.get_conf().srv_auth_ip), ephemeral=True)
         except SessionExpiredError as e:
             pass
@@ -154,9 +153,7 @@ class EZKRuntime:
         logger.info('refreshing children & routes')
 
         try:
-            children = self.get_zk().get_children('%s/%s' % (
-                self.get_conf().zk_path_service,
-                self.get_conf().srv_name))
+            children = self.get_zk().get_children(self.get_conf().zk_path_service)
             bgp_table = BGPTable()
 
             for ip in self.get_conf().srv_non_auth_ips:
@@ -219,20 +216,15 @@ except KazooTimeoutError as e:
     exit(1)
 
 runtime.get_zk().add_listener(zk_transition)
-runtime.get_zk().ensure_path('%s/%s' % (
-    runtime.get_conf().zk_path_service,
-    runtime.get_conf().srv_name))
+runtime.get_zk().ensure_path(runtime.get_conf().zk_path_service)
 
-while runtime.get_zk().exists('%s/%s/%s' % (
-    runtime.get_conf().zk_path_service,
-    runtime.get_conf().srv_name,
-    runtime.get_conf().srv_auth_ip)):
+while runtime.get_zk().exists('%s/%s' %
+        (runtime.get_conf().zk_path_service, runtime.get_conf().srv_auth_ip)):
+
     logger.warn('stale node found, sleeping(1)...')
     time.sleep(1)
 
-@zk.ChildrenWatch('%s/%s' % (
-    runtime.get_conf().zk_path_service,
-    runtime.get_conf().srv_name))
+@zk.ChildrenWatch(runtime.get_conf().zk_path_service)
 def zk_watch(children):
     logger.debug('zk children are %s' % children)
     runtime.trigger_refresh()
