@@ -54,8 +54,8 @@ class BGPTable:
         self.withdraw= []
 
     def add_route(self, **route):
-        if 'prefix' not in route or 'dst' not in route or 'metric' not in route:
-            raise Exception('prefix, dst & metric are mandatory in route')
+        if 'prefix' not in route or 'metric' not in route:
+            raise Exception('prefix & metric are mandatory in route')
         logger.debug('adding BGP route: %s' % route['prefix'])
         self.announce.append(route)
 
@@ -158,12 +158,11 @@ class EZKRuntime:
 
             for ip in self.get_conf().srv_non_auth_ips:
                 if ip not in children:
-                    bgp_table.add_route(prefix=ip, dst='1.1.1.1', metric=200)
+                    bgp_table.add_route(prefix=ip, metric=200)
                 else:
                     bgp_table.del_route(prefix=ip)
 
-            bgp_table.add_route(prefix=runtime.get_conf().srv_auth_ip,
-                    dst='1.1.1.1', metric=100)
+            bgp_table.add_route(prefix=runtime.get_conf().srv_auth_ip, metric=100)
             self.set_bgp_table(bgp_table)
         except SessionExpiredError as e:
             pass
