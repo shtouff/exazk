@@ -15,18 +15,35 @@ logging.basicConfig()
 logger = logging.getLogger()
 logger.setLevel('DEBUG')
 
+class Alarm(Exception):
+    pass
+def alarm_signal_handler (number, frame):  # pylint: disable=W0613
+    raise Alarm()
+
 class ServiceChecker:
     def __init__(self, command):
         self.command = command
 
     def check(self):
         try:
+            signal.signal(signal.SIGALRM, alarm_signal_handler)
+            signal.alarm(1)
+
             DEVNULL = open(os.devnull, 'w')
-            subprocess.check_call(self.command, shell=True,
-                    stdout=DEVNULL, stderr=DEVNULL, close_fds=True)
-            return True
-        except subprocess.CalledProcessError as e:
-            logger.error('local check returned: %s' % e.returncode)
+            p = subprocess.Popen(self.command, shell=True,
+                    stdout=DEVNULL, stderr=DEVNULL, close_fds=True,
+                    preexec_fn=os.setpgrp)
+
+            rc = p.wait()
+            signal.signal(signal.SIGALRM, signal.SIG_IGN)
+            if rc == 0:
+                return True
+            else:
+                logger.error('local check returned: %s' % rc)
+
+        except Alarm:
+            logger.error("local check spent more than 1s to run")
+            os.killpg(p.pid, signal.SIGKILL)
 
         return False
 
