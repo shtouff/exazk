@@ -10,6 +10,7 @@ import subprocess
 
 from kazoo.client import KazooClient, KazooState
 from kazoo.exceptions import SessionExpiredError
+from kazoo.handlers.threading import KazooTimeoutError
 
 logging.basicConfig()
 logger = logging.getLogger()
@@ -146,26 +147,29 @@ class EZKRuntime:
                 self.get_conf().srv_name,
                 self.get_conf().srv_auth_ip), ephemeral=True)
         except SessionExpiredError as e:
-            self.recreate = True
+            pass
 
     def refresh_children(self):
         self.refresh = False
         logger.info('refreshing children & routes')
 
-        children = self.get_zk().get_children('%s/%s' % (
+        try:
+            children = self.get_zk().get_children('%s/%s' % (
                 self.get_conf().zk_path_service,
                 self.get_conf().srv_name))
-        bgp_table = BGPTable()
+            bgp_table = BGPTable()
 
-        for ip in self.get_conf().srv_non_auth_ips:
-            if ip not in children:
-                bgp_table.add_route(prefix=ip, dst='1.1.1.1', metric=200)
-            else:
-                bgp_table.del_route(prefix=ip)
+            for ip in self.get_conf().srv_non_auth_ips:
+                if ip not in children:
+                    bgp_table.add_route(prefix=ip, dst='1.1.1.1', metric=200)
+                else:
+                    bgp_table.del_route(prefix=ip)
 
-        bgp_table.add_route(prefix=runtime.get_conf().srv_auth_ip,
-                dst='1.1.1.1', metric=100)
-        self.set_bgp_table(bgp_table)
+            bgp_table.add_route(prefix=runtime.get_conf().srv_auth_ip,
+                    dst='1.1.1.1', metric=100)
+            self.set_bgp_table(bgp_table)
+        except SessionExpiredError as e:
+            pass
 
     def withdraw_all(self):
         logging.info('withdrawing all routes')
@@ -180,9 +184,6 @@ class EZKRuntime:
 
     def trigger_recreate(self):
         self.recreate = True
-
-class EZKState(KazooState):
-    INIT = "INIT"
 
 logger.info('ExaZK starting...')
 conf = EZKConfFactory().create_from_yaml_file(sys.argv[1])
@@ -211,8 +212,13 @@ def zk_transition(state):
     if state == KazooState.CONNECTED:
         runtime.trigger_refresh()
 
+try:
+    runtime.get_zk().start()
+except KazooTimeoutError as e:
+    logger.error("can't connect to zk, aborting...")
+    exit(1)
+
 runtime.get_zk().add_listener(zk_transition)
-runtime.get_zk().start()
 runtime.get_zk().ensure_path('%s/%s' % (
     runtime.get_conf().zk_path_service,
     runtime.get_conf().srv_name))
@@ -247,12 +253,9 @@ while not runtime.shouldstop:
     if runtime.recreate:
         runtime.create_node()
 
-    if runtime.refresh:
-        runtime.refresh_children()
-
     if not ServiceChecker(runtime.get_conf().local_check).check():
         runtime.withdraw_all()
-    else:
+    elif runtime.get_zk().state == KazooState.CONNECTED:
         runtime.refresh_children()
 
     BGPSpeaker(runtime.get_bgp_table()).advertise_routes()
