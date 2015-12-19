@@ -181,81 +181,87 @@ class EZKRuntime:
     def trigger_recreate(self):
         self.recreate = True
 
-logger.info('ExaZK starting...')
-conf = EZKConfFactory().create_from_yaml_file(sys.argv[1])
-zk = KazooClient(hosts=','.join(conf.zk_hosts))
-runtime = EZKRuntime(conf=conf, zk=zk)
+def main():
+    global runtime
 
-# exits gracefully when possible
-def exit_signal_handler(signal, frame):
-    logger.info('received signal %s, preparing to stop' % signal)
-    runtime.shouldstop = True
+    logger.info('ExaZK starting...')
+    conf = EZKConfFactory().create_from_yaml_file(sys.argv[1])
+    zk = KazooClient(hosts=','.join(conf.zk_hosts))
+    runtime = EZKRuntime(conf=conf, zk=zk)
 
-signal.signal(signal.SIGINT, exit_signal_handler)
-signal.signal(signal.SIGTERM, exit_signal_handler)
+    # exits gracefully when possible
+    def exit_signal_handler(signal, frame):
+        logger.info('received signal %s, preparing to stop' % signal)
+        runtime.shouldstop = True
 
-def zk_transition(state):
-    logger.info('zk state changed to %s' % state)
+    signal.signal(signal.SIGINT, exit_signal_handler)
+    signal.signal(signal.SIGTERM, exit_signal_handler)
 
-    if state == KazooState.SUSPENDED:
-        logger.error('zk disconnected, flushing routes...')
-        runtime.withdraw_all()
+    def zk_transition(state):
+        logger.info('zk state changed to %s' % state)
 
-    if state == KazooState.LOST:
-        logger.error('zk lost, have to re-create ephemeral node')
-        runtime.trigger_recreate()
+        if state == KazooState.SUSPENDED:
+            logger.error('zk disconnected, flushing routes...')
+            runtime.withdraw_all()
 
-    if state == KazooState.CONNECTED:
+        if state == KazooState.LOST:
+            logger.error('zk lost, have to re-create ephemeral node')
+            runtime.trigger_recreate()
+
+        if state == KazooState.CONNECTED:
+            runtime.trigger_refresh()
+
+    try:
+        runtime.get_zk().start()
+    except KazooTimeoutError as e:
+        logger.error("can't connect to zk, aborting...")
+        exit(1)
+
+    runtime.get_zk().add_listener(zk_transition)
+    runtime.get_zk().ensure_path(runtime.get_conf().zk_path_service)
+
+    while runtime.get_zk().exists('%s/%s' %
+            (runtime.get_conf().zk_path_service, runtime.get_conf().srv_auth_ip)):
+
+        logger.warn('stale node found, sleeping(1)...')
+        time.sleep(1)
+
+    @zk.ChildrenWatch(runtime.get_conf().zk_path_service)
+    def zk_watch(children):
+        logger.debug('zk children are %s' % children)
         runtime.trigger_refresh()
 
-try:
-    runtime.get_zk().start()
-except KazooTimeoutError as e:
-    logger.error("can't connect to zk, aborting...")
-    exit(1)
+    while not runtime.shouldstop:
 
-runtime.get_zk().add_listener(zk_transition)
-runtime.get_zk().ensure_path(runtime.get_conf().zk_path_service)
+        now = start = time.time()
+        while not runtime.refresh and not runtime.recreate \
+                and now<start+runtime.longsleep \
+                and not runtime.shouldstop:
 
-while runtime.get_zk().exists('%s/%s' %
-        (runtime.get_conf().zk_path_service, runtime.get_conf().srv_auth_ip)):
+            time.sleep(runtime.shortsleep)
+            now = time.time()
 
-    logger.warn('stale node found, sleeping(1)...')
-    time.sleep(1)
+        if runtime.shouldstop:
+            break
 
-@zk.ChildrenWatch(runtime.get_conf().zk_path_service)
-def zk_watch(children):
-    logger.debug('zk children are %s' % children)
-    runtime.trigger_refresh()
+        if runtime.recreate:
+            runtime.create_node()
 
-while not runtime.shouldstop:
+        if not ServiceChecker(runtime.get_conf().local_check).check() \
+                or runtime.get_zk().exists(runtime.get_conf().zk_path_maintenance):
+            runtime.withdraw_all()
+        elif runtime.get_zk().state == KazooState.CONNECTED:
+            runtime.refresh_children()
 
-    now = start = time.time()
-    while not runtime.refresh and not runtime.recreate \
-            and now<start+runtime.longsleep \
-            and not runtime.shouldstop:
+        BGPSpeaker(runtime.get_bgp_table()).advertise_routes()
 
-        time.sleep(runtime.shortsleep)
-        now = time.time()
+    # main loop exited, cleaning resources
+    try:
+        runtime.get_zk().stop()
+        runtime.get_zk().close()
+        logger.info('ExaZK stopped')
+    except Exception as e:
+        logger.error('did my best but something went wrong while stopping :(')
 
-    if runtime.shouldstop:
-        break
-
-    if runtime.recreate:
-        runtime.create_node()
-
-    if not ServiceChecker(runtime.get_conf().local_check).check() \
-            or runtime.get_zk().exists(runtime.get_conf().zk_path_maintenance):
-        runtime.withdraw_all()
-    elif runtime.get_zk().state == KazooState.CONNECTED:
-        runtime.refresh_children()
-
-    BGPSpeaker(runtime.get_bgp_table()).advertise_routes()
-
-# main loop exited, cleaning resources
-try:
-    runtime.get_zk().stop()
-    runtime.get_zk().close()
-    logger.info('ExaZK stopped')
-except Exception as e:
-    logger.error('did my best but something went wrong while stopping :(')
+if __name__ == '__main__':
+    main()
