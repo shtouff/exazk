@@ -2,8 +2,8 @@
 # zk configuration
 zk_hosts: 
     - localhost
-zk_path_service: /exabgp/service
-zk_path_maintenance: /exabgp/maintenance
+zk_path_service: /exabgp/service/apex
+zk_path_maintenance: /exabgp/maintenance/apex
 
 # how to check local service
 local_check: /usr/local/bin/check_local_nginx.sh

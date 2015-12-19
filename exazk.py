@@ -245,7 +245,8 @@ while not runtime.shouldstop:
     if runtime.recreate:
         runtime.create_node()
 
-    if not ServiceChecker(runtime.get_conf().local_check).check():
+    if not ServiceChecker(runtime.get_conf().local_check).check() \
+            or runtime.get_zk().exists(runtime.get_conf().zk_path_maintenance):
         runtime.withdraw_all()
     elif runtime.get_zk().state == KazooState.CONNECTED:
         runtime.refresh_children()
