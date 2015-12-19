@@ -13,13 +13,29 @@ from kazoo.exceptions import SessionExpiredError
 from kazoo.handlers.threading import KazooTimeoutError
 
 logging.basicConfig()
-logger = logging.getLogger()
+logger = logging.getLogger('exazk')
 logger.setLevel('DEBUG')
 
 class Alarm(Exception):
     pass
 def alarm_signal_handler (number, frame):  # pylint: disable=W0613
     raise Alarm()
+
+class MaintenanceChecker:
+    def __init__(self, zk, zk_path):
+        if not isinstance(zk, KazooClient):
+            raise Exception('KazooClient object expected')
+
+        self.zk = zk
+        self.zk_path = zk_path
+
+    """ return True if maintenance mode engaged
+    """
+    def check(self):
+        try:
+            return(self.zk.exists(self.zk_path))
+        except SessionExpiredError as e:
+            return False
 
 class ServiceChecker:
     def __init__(self, command):
@@ -248,7 +264,7 @@ def main():
             runtime.create_node()
 
         if not ServiceChecker(runtime.get_conf().local_check).check() \
-                or runtime.get_zk().exists(runtime.get_conf().zk_path_maintenance):
+                or MaintenanceChecker(runtime.get_zk(), runtime.get_conf().zk_path_maintenance).check():
             runtime.withdraw_all()
         elif runtime.get_zk().state == KazooState.CONNECTED:
             runtime.refresh_children()
