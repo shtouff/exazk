@@ -1,13 +1,9 @@
 ---
-- hosts: all
-  remote_user: vagrant
-  sudo: yes
-  tasks:
-      - apt: name=quagga state=latest
-      - user: append=yes groups=quaggavty name=vagrant
-      - copy: src=quagga/etc/quagga/daemons dest=/etc/quagga/daemons
-      - copy: src=quagga/etc/quagga/Quagga.conf{{ machine_id }} dest=/etc/quagga/Quagga.conf
-      - copy: src=quagga/etc/quagga/vtysh.conf{{ machine_id }} dest=/etc/quagga/vtysh.conf
-      - copy: src=quagga/etc/environment dest=/etc/environment
-      - file: path=/etc/quagga/Quagga.conf owner=root group=quaggavty mode=0640
-      - service: name=quagga state=restarted
+- apt: name=quagga state=latest
+- user: append=yes groups=quaggavty name=vagrant
+- copy: src=quagga/etc/quagga/daemons dest=/etc/quagga/daemons
+- copy: src=quagga/etc/quagga/Quagga.conf{{ machine_id }} dest=/etc/quagga/Quagga.conf
+- copy: src=quagga/etc/quagga/vtysh.conf{{ machine_id }} dest=/etc/quagga/vtysh.conf
+- copy: src=quagga/etc/environment dest=/etc/environment
+- file: path=/etc/quagga/Quagga.conf owner=root group=quaggavty mode=0640
+- service: name=quagga state=restarted

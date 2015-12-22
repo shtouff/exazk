@@ -1,0 +1,2 @@
+---
+- apt: name=bird state=latest

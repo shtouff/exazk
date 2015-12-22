@@ -1,0 +1,7 @@
+---
+- hosts: all
+  remote_user: vagrant
+  sudo: yes
+  tasks:
+      - include: quagga.yml
+      - include: bird.yml
