@@ -151,7 +151,9 @@ class MaintenanceChecker:
     """
     def check(self):
         try:
-            return(self.zk.exists(self.zk_path))
+            if self.zk.exists(self.zk_path):
+                logger.warn('maintenance mode engaged ...')
+                return True
         except SessionExpiredError as e:
             return False
 
