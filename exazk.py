@@ -245,6 +245,9 @@ class EZKConf:
         for key, value in kwargs.items():
             setattr(self, key, value)
 
+    def __str__(self):
+        return str(self.__dict__)
+
 class EZKRuntime:
     def __init__(self, conf, zk):
         if not isinstance(conf, EZKConf):
