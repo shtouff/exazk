@@ -5,16 +5,134 @@ import time
 import sys
 import signal
 import os
+import string
 import logging
+import logging.handlers
 import subprocess
+import argparse
 
 from kazoo.client import KazooClient, KazooState
 from kazoo.exceptions import SessionExpiredError
 from kazoo.handlers.threading import KazooTimeoutError
 
-logging.basicConfig()
-logger = logging.getLogger('exazk')
-logger.setLevel('DEBUG')
+# ip_address
+try:
+    # Python 3.3+ or backport
+    from ipaddress import ip_address as _ip_address  # pylint: disable=F0401
+
+    def ip_address(x):
+        try:
+            x = x.decode('ascii')
+        except AttributeError:
+            pass
+        return _ip_address(x)
+except ImportError:
+    # Python 2.6, 2.7, 3.2
+    from ipaddr import IPAddress as ip_address
+try:
+    # Python 3.4+
+    from enum import Enum
+except ImportError:
+    # Other versions. This is not really an enum but this is OK for
+    # what we want to do.
+    def Enum (*sequential):
+        return type(str("Enum"), (), dict(zip(sequential, sequential)))
+
+logger = logging.getLogger()
+kzlogger = logging.getLogger('kazoo.client')
+
+def parse ():
+    """Parse arguments"""
+    parser = argparse.ArgumentParser(description=sys.modules[__name__].__doc__,
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+
+    parser.add_argument("--config", "-f", metavar="FILE", type=open, dest="conffile",
+                        help="read configuration from file FILE. Will cancel any cmdline option")
+
+    g = parser.add_argument_group("logging options")
+    g.add_argument("--debug", "-d", action="store_true",
+                   default=False,
+                   help="enable debugging, disable syslog logging")
+    g.add_argument("--silent", "-s", action="store_true",
+                   default=False,
+                   help="don't log to console")
+    g.add_argument("--no-syslog", action="store_false", dest='syslog',
+                   help="disable syslog logging")
+    g.add_argument("--syslog-facility", "-sF", metavar="FACILITY",
+                   nargs='?',
+                   const="daemon",
+                   default="daemon",
+                   help="log to syslog using FACILITY, default FACILITY is daemon")
+
+    g = parser.add_argument_group("ZooKeeper options")
+    g.add_argument("--zk-hosts", "-zH", metavar='HOST',
+                   type=str, dest="zk_hosts", action="append",
+                   help="one of the ZooKeeper HOST to connect to")
+    g.add_argument("--zk-path-service", "-zPS", dest="zk_path_service", metavar='ZKKEY',
+                   type=str,
+                   help="the ZKKEY path in ZooKeeper, where this instance should write if it's alive")
+    g.add_argument("--zk-path-maintenance", "-zPM", dest="zk_path_maintenance", metavar='ZKKEY',
+                   type=str,
+                   help="if ZKKEY exists in ZooKeeper, the service is considered disabled")
+
+    g = parser.add_argument_group("local check options")
+    g.add_argument("--local-check", "-c", metavar='CMD',
+                   type=str,
+                   help="command to use for local check of service")
+
+    g = parser.add_argument_group("advertising options")
+    g.add_argument("--name", "-n", dest="srv_name", metavar='NAME',
+                   type=str,
+                   help="the service NAME of this instance")
+    g.add_argument("--auth-ip", "-A", dest="srv_auth_ip", metavar='IP',
+                   type=ip_address,
+                   help="the IP this instance is authoritative for")
+    g.add_argument("--non-auth-ip", "-N", metavar='IP',
+                   type=ip_address, dest="srv_non_auth_ips", action="append",
+                   help="one of the IP addresses this instance is non authoritative for")
+
+    options = parser.parse_args()
+    return options
+
+def setup_logging (debug, silent, name, syslog_facility, syslog):
+    """Setup logger"""
+
+    logger.setLevel(debug and logging.DEBUG or logging.INFO)
+    kzlogger.setLevel(debug and logging.DEBUG or logging.INFO)
+
+    # syslog
+    def syslog_address():
+        """Return a sensitive syslog address"""
+        if sys.platform == "darwin":
+            return "/var/run/syslog"
+        if sys.platform.startswith("freebsd"):
+            return "/var/run/log"
+        if sys.platform.startswith("linux"):
+            return "/dev/log"
+        raise EnvironmentError("Unable to guess syslog address for your "
+                "platform, try to disable syslog")
+
+    if syslog and not debug:
+        facility = getattr(logging.handlers.SysLogHandler,
+                "LOG_{0}".format(string.upper(syslog_facility)))
+        sh = logging.handlers.SysLogHandler(address=str(syslog_address()),
+                facility=facility)
+        sh.setFormatter(logging.Formatter(
+            "exazk-{0}[{1}]: %(name)s: %(message)s".format(
+                name, os.getpid())))
+        logger.addHandler(sh)
+
+    # stderr
+    if sys.stderr.isatty() and not silent:
+        ch = logging.StreamHandler()
+        ch.setFormatter(logging.Formatter(
+            "%(levelno)s: %(name)s: %(message)s"))
+        logger.addHandler(ch)
+
+    # no log at all
+    if silent and not syslog:
+        nh = logging.NullHandler()
+        logger.addHandler(nh)
 
 class Alarm(Exception):
     pass
@@ -108,9 +226,17 @@ class BGPSpeaker:
 
 class EZKConfFactory:
     def create_from_yaml_file(self, path):
-        yml = yaml.safe_load(open(path))
+        logger.debug('creating from YAML')
+        yml = yaml.safe_load(path)
 
         return EZKConf(**yml)
+
+    def create_from_options(self, options):
+
+        if not isinstance(options, argparse.Namespace):
+            raise Exception('Namespace object expected')
+
+        return EZKConf(**options.__dict__)
 
 class EZKConf:
     def __init__(self, **kwargs):
@@ -200,8 +326,18 @@ class EZKRuntime:
 def main():
     global runtime
 
-    logger.info('ExaZK starting...')
-    conf = EZKConfFactory().create_from_yaml_file(sys.argv[1])
+    options = parse()
+
+    if options.conffile:
+        conf = EZKConfFactory().create_from_yaml_file(options.conffile)
+    else:
+        conf = EZKConfFactory().create_from_options(options)
+
+    setup_logging(conf.debug, conf.silent, conf.srv_name,
+                  conf.syslog_facility, conf.syslog)
+
+    logger.warn('ExaZK starting...')
+    logger.debug('debug is active')
     zk = KazooClient(hosts=','.join(conf.zk_hosts))
     runtime = EZKRuntime(conf=conf, zk=zk)
 
