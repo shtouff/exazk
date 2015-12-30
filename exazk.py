@@ -348,7 +348,7 @@ def main():
 
     # exits gracefully when possible
     def exit_signal_handler(signal, frame):
-        logger.info('received signal %s, preparing to stop' % signal)
+        logger.warn('received signal %s, preparing to stop' % signal)
         runtime.shouldstop = True
 
     signal.signal(signal.SIGINT, exit_signal_handler)
