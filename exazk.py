@@ -65,7 +65,7 @@ def parse ():
                    help="log to syslog using FACILITY, default FACILITY is daemon")
 
     g = parser.add_argument_group("ZooKeeper options")
-    g.add_argument("--zk-hosts", "-zH", metavar='HOST',
+    g.add_argument("--zk-host", "-zH", metavar='HOST',
                    type=str, dest="zk_hosts", action="append",
                    help="one of the ZooKeeper HOST to connect to")
     g.add_argument("--zk-path-service", "-zPS", dest="zk_path_service", metavar='ZKKEY',
