@@ -315,6 +315,7 @@ class EZKRuntime:
             pass
 
     def withdraw_all(self):
+        self.refresh = False
         logging.info('withdrawing all routes')
         bgp_table = BGPTable()
         for ip in self.get_conf().srv_non_auth_ips:
