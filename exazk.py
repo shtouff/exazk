@@ -1,5 +1,11 @@
 #!/usr/bin/env python
 
+""" ZooKeeper-based service checker for exabgp.
+This program is to be used as a process for exabgp. It will announce
+some VIP depending on the state of the VIP in ZooKeeper.
+
+"""
+
 import yaml
 import time
 import sys
