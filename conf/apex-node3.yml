@@ -5,6 +5,12 @@ zk_hosts:
 zk_path_service: /exabgp/service/apex
 zk_path_maintenance: /exabgp/maintenance/apex
 
+# log configuration
+debug: False            # set log level to debug
+silent: False           # log to console, if not silent
+syslog: True            # log to syslog
+syslog_facility: daemon # syslog facility
+
 # how to check local service
 local_check: /usr/local/bin/check_local_nginx.sh
 
