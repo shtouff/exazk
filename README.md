@@ -48,6 +48,6 @@ One can then launch 3 instances of exabgp + exazk, each one connected to a parti
 
 This testsuite uses vagrant + ansible for provisionning. You'll also need a ZK instance too, obviously.
 
-   $ cd tests && vagrant up
-   $ vagrant ssh r1 -- vtysh # <= connect to the 1st quagga instance
+    $ cd tests && vagrant up
+    $ vagrant ssh r1 -- vtysh # <= connect to the 1st quagga instance
 
