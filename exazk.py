@@ -310,7 +310,7 @@ class EZKRuntime:
             bgp_table = BGPTable()
 
             for ip in self.get_conf().srv_non_auth_ips:
-                if ip not in children:
+                if str(ip) not in children:
                     bgp_table.add_route(prefix=ip, metric=200)
                 else:
                     bgp_table.del_route(prefix=ip)
