@@ -7,7 +7,7 @@ Vagrant.configure(2) do |config|
   (1..N).each do |machine_id|
     config.vm.define "r#{machine_id}" do |machine|
 
-      machine.vm.hostname = "quagga#{machine_id}"
+      machine.vm.hostname = "router#{machine_id}"
       machine.vm.network "private_network", ip: "172.28.128.#{10+machine_id}"
       machine.vm.box = "jessie64"
       machine.vm.provision "ansible" do |ansible|
