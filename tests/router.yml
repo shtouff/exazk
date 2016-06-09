@@ -4,4 +4,5 @@
   become: yes
   become_method: sudo
   tasks:
+      - include: bash.yml
       - include: bird.yml

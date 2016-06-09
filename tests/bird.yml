@@ -1,2 +1,6 @@
 ---
 - apt: name=bird state=latest
+- user: append=yes groups=bird name=vagrant
+- copy: src=bird/etc/bird/bird.conf{{ machine_id }} dest=/etc/bird/bird.conf
+- file: path=/etc/bird/bird.conf owner=bird group=bird mode=0640
+- service: name=bird state=restarted

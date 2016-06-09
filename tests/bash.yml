@@ -1,0 +1,2 @@
+---
+- copy: src=bash/home/vagrant/.profile dest=/home/vagrant/.profile

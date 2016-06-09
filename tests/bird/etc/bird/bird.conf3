@@ -1,0 +1,33 @@
+router id 172.28.128.13;
+
+protocol kernel {
+        persist;                # Don't remove routes on bird shutdown
+        scan time 20;           # Scan kernel routing table every 20 seconds
+        export all;             # Default is export none
+}
+
+protocol device {
+        scan time 10;           # Scan interfaces every 10 seconds
+}
+
+protocol static {
+}
+
+template bgp ROUTER {
+    local as 65013;
+}
+
+protocol bgp host1 from ROUTER {
+    neighbor 172.28.128.1 as 65001;
+}
+
+protocol bgp router1 from ROUTER {
+    neighbor 172.28.128.11 as 65011;
+}
+
+protocol bgp router2 from ROUTER {
+    neighbor 172.28.128.12 as 65012;
+}
+
+
+
