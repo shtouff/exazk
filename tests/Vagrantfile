@@ -4,11 +4,28 @@
 N = 3
 
 Vagrant.configure(2) do |config|
+
+  config.vm.define "r0" do |r0|
+    r0.vm.hostname = "router0"
+    r0.vm.network "private_network", ip: "172.16.0.6", netmask: "255.255.255.248"
+    r0.vm.network "private_network", ip: "172.16.0.14", netmask: "255.255.255.248"
+    r0.vm.network "private_network", ip: "172.16.0.22", netmask: "255.255.255.248"
+
+    r0.vm.box = "jessie64"
+    r0.vm.provision "ansible" do |ansible|
+      ansible.playbook = "router.yml"
+      ansible.extra_vars = {
+        machine_id: 0
+      }
+    end
+  end
+
   (1..N).each do |machine_id|
     config.vm.define "r#{machine_id}" do |machine|
 
       machine.vm.hostname = "router#{machine_id}"
-      machine.vm.network "private_network", ip: "172.28.128.#{10+machine_id}"
+      machine.vm.network "private_network", ip: "172.16.0.#{5+(machine_id-1)*8}", netmask: "255.255.255.248"
+      machine.vm.network "private_network", ip: "172.16.1.#{6+(machine_id-1)*8}", netmask: "255.255.255.248"
       machine.vm.box = "jessie64"
       machine.vm.provision "ansible" do |ansible|
         ansible.playbook = "router.yml"
