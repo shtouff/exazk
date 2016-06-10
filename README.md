@@ -51,3 +51,4 @@ This testsuite uses vagrant + ansible for provisionning. You'll also need a ZK i
     $ cd tests && vagrant up
     $ vagrant ssh r1 -- vtysh # <= connect to the 1st quagga instance
 
+![test-framework.png](docs/test-framework.png "Test framework with virtualbox")
