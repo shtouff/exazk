@@ -18,7 +18,7 @@ import subprocess
 import argparse
 
 from kazoo.client import KazooClient, KazooState
-from kazoo.exceptions import SessionExpiredError
+from kazoo.exceptions import SessionExpiredError, NoNodeError, NodeExistsError
 from kazoo.handlers.threading import KazooTimeoutError
 
 # ip_address
@@ -158,7 +158,7 @@ class MaintenanceChecker:
     def check(self):
         try:
             if self.zk.exists(self.zk_path):
-                logger.warn('maintenance mode engaged ...')
+                logger.warn('maintenance mode requested ...')
                 return True
         except SessionExpiredError as e:
             return False
@@ -270,6 +270,7 @@ class EZKRuntime:
         self.refresh = True
         self.recreate = True
         self.shouldstop = False
+        self.maintenance = False
 
         # slow & fast cycles
         self.longsleep = 10
@@ -294,12 +295,31 @@ class EZKRuntime:
         self.recreate = False
         logger.info('re-creating my ephemeral node')
 
-        try:
-            self.get_zk().create('%s/%s' % (
+        node = '%s/%s' % (
                 self.get_conf().zk_path_service,
-                self.get_conf().srv_auth_ip), ephemeral=True)
+                self.get_conf().srv_auth_ip
+                )
+        try:
+            self.get_zk().create(node, ephemeral=True)
         except SessionExpiredError as e:
             pass
+        except NodeExistsError as nee:
+            logger.debug('NodeExistsError: %s' % node)
+
+    def del_node(self):
+        self.recreate = False
+        logger.info('deleting my ephemeral node')
+
+        node = '%s/%s' % (
+                self.get_conf().zk_path_service,
+                self.get_conf().srv_auth_ip
+                )
+        try:
+            self.get_zk().delete(node, recursive=False)
+        except SessionExpiredError as e:
+            pass
+        except NoNodeError as nne:
+            logger.debug('NoNodeError: %s' % node)
 
     def refresh_children(self):
         self.refresh = False
@@ -315,7 +335,12 @@ class EZKRuntime:
                 else:
                     bgp_table.del_route(prefix=ip)
 
-            bgp_table.add_route(prefix=runtime.get_conf().srv_auth_ip, metric=100)
+            ip = self.get_conf().srv_auth_ip
+            if str(ip) not in children:
+                bgp_table.del_route(prefix=ip)
+            else:
+                bgp_table.add_route(prefix=ip, metric=100)
+
             self.set_bgp_table(bgp_table)
         except SessionExpiredError as e:
             pass
@@ -334,6 +359,12 @@ class EZKRuntime:
 
     def trigger_recreate(self):
         self.recreate = True
+
+    def trigger_maintenance(self):
+        self.maintenance = True
+
+    def cancel_maintenance(self):
+        self.maintenance = False
 
 def main():
     global runtime
@@ -411,10 +442,17 @@ def main():
         if runtime.recreate:
             runtime.create_node()
 
+        if runtime.maintenance:
+            runtime.del_node()
+            runtime.withdraw_all()
+
         if not ServiceChecker(runtime.get_conf().local_check).check() \
                 or MaintenanceChecker(runtime.get_zk(), runtime.get_conf().zk_path_maintenance).check():
-            runtime.withdraw_all()
+            runtime.trigger_maintenance()
         elif runtime.get_zk().state == KazooState.CONNECTED:
+            if runtime.maintenance:
+                runtime.cancel_maintenance()
+                runtime.trigger_recreate()
             runtime.refresh_children()
 
         BGPSpeaker(runtime.get_bgp_table()).advertise_routes()
