@@ -3,7 +3,7 @@
 zk_hosts: 
     - localhost
 zk_path_service: /exabgp/service/apex
-zk_path_maintenance: /exabgp/maintenance/apex
+zk_path_maintenance: /exabgp/maintenance/apex/node3
 
 # log configuration
 debug: False            # set log level to debug
